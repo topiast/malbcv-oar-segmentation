@@ -64,7 +64,7 @@ def main() -> None:
         "--input-root",
         type=Path,
         default=Path("data/raw/RawData"),
-        help="Path to the original BTCV RawData directory.",
+        help="Path to the original raw dataset directory.",
     )
     parser.add_argument(
         "--output-root",

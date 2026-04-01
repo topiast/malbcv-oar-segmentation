@@ -1,9 +1,9 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="btcv-organ-segmentation",
+    name="malbcv-oar-segmentation",
     version="0.1.0",
-    description="3D U-Net for automatic segmentation of abdominal organs in CT images (BTCV dataset)",
+    description="3D U-Net for automatic segmentation of abdominal organs in CT images (MALBCV dataset)",
     author="Topi Astikainen",
     packages=find_packages(),
     python_requires=">=3.10",

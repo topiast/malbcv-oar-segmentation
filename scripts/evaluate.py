@@ -57,12 +57,12 @@ def main():
     for pred_file in pred_files:
         patient_name = pred_file.stem.replace(".nii", "")
 
-        # Find matching ground truth — support multiple directory layouts:
+        # Find matching ground truth across supported directory layouts:
         # 1. Processed: gt_dir/<patient_name>/GT.nii.gz
-        # 2. Raw BTCV: gt_dir/label/label<id>.nii.gz
+        # 2. Raw img/label layout: gt_dir/label/label<id>.nii.gz
         gt_file = gt_dir / patient_name / "GT.nii.gz"
         if not gt_file.exists():
-            # Try raw BTCV layout (img0001 -> label0001)
+            # Try raw img/label layout (img0001 -> label0001)
             case_id = patient_name.replace("img", "")
             gt_file = gt_dir / "label" / f"label{case_id}.nii.gz"
         if not gt_file.exists():

@@ -1,5 +1,5 @@
 """
-Preprocessing pipeline for BTCV dataset.
+Preprocessing pipeline for abdominal organ segmentation datasets.
 
 Steps per patient:
 1. Load NIfTI volume and labels
@@ -143,7 +143,7 @@ def preprocess_all(
     hu_max: float = 250.0,
 ) -> list[dict]:
     """
-    Preprocess all patients in the BTCV input directory.
+    Preprocess all patients in an img/label training directory.
 
     Expected structure:
         input_dir/
@@ -181,8 +181,8 @@ def preprocess_all(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Preprocess BTCV dataset")
-    parser.add_argument("--input", type=str, required=True, help="Path to BTCV Training directory (containing img/ and label/)")
+    parser = argparse.ArgumentParser(description="Preprocess raw training data")
+    parser.add_argument("--input", type=str, required=True, help="Path to a training directory containing img/ and label/")
     parser.add_argument("--output", type=str, required=True, help="Path to output directory")
     parser.add_argument(
         "--spacing", type=float, nargs=3, default=[1.5, 1.5, 2.0],

@@ -11,7 +11,7 @@ def discover_training_pairs(data_dir: str | Path) -> list[dict]:
 
     Supported layouts:
     - Processed patient subdirs: ``<case>/<case>.nii.gz`` + ``<case>/GT.nii.gz``
-    - Raw BTCV: ``img/img0001.nii.gz`` + ``label/label0001.nii.gz``
+    - Raw img/label layout: ``img/img0001.nii.gz`` + ``label/label0001.nii.gz``
     - Averaged binary data: ``averaged-training-images/*_avg.nii.gz`` +
       ``averaged-training-labels/*_avg_seg.nii.gz``
     """
@@ -76,7 +76,7 @@ def get_training_datalists(
     if not data_list:
         raise FileNotFoundError(
             f"No valid training data found in {data_dir}. "
-            "Expected processed patient subdirs, raw BTCV img/label directories, "
+            "Expected processed patient subdirs, raw img/label directories, "
             "or averaged-training-images plus averaged-training-labels."
         )
 

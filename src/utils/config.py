@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-DEFAULT_BTCV_CLASS_NAMES = [
+DEFAULT_CLASS_NAMES = [
     "Background",
     "Spleen",
     "Right Kidney",
@@ -34,8 +34,8 @@ def get_class_names(config: dict) -> list[str]:
             )
         return class_names
 
-    if num_classes == len(DEFAULT_BTCV_CLASS_NAMES):
-        return DEFAULT_BTCV_CLASS_NAMES
+    if num_classes == len(DEFAULT_CLASS_NAMES):
+        return DEFAULT_CLASS_NAMES
 
     return ["Background"] + [f"Class {idx}" for idx in range(1, num_classes)]
 
