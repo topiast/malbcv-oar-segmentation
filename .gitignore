@@ -1,0 +1,33 @@
+# Data (large files, not tracked in git)
+data/raw/
+data/processed/
+
+# Results (regenerable)
+results/checkpoints/
+results/predictions/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+tensorboard_logs/
+
+# Environment
+.env

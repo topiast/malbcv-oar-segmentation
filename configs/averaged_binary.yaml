@@ -1,0 +1,50 @@
+data:
+  raw_dir: "data/raw"
+  train_dir: "data/raw"
+  processed_dir: "data/raw"
+  test_dir: "data/raw/averaged-testing-images"
+  num_classes: 2
+  class_names: ["Background", "Foreground"]
+  patch_size: [128, 128, 24]
+  target_spacing: [1.5, 1.5, 2.0]
+  intensity_clip: [0, 255]
+  pos_neg_ratio: 2
+  cache_rate: 1.0
+
+training:
+  batch_size: 1
+  num_epochs: 300
+  learning_rate: 0.0001
+  weight_decay: 0.00001
+  num_folds: 5
+  num_workers: 4
+  val_interval: 10
+  seed: 42
+  amp: true
+
+model:
+  architecture: "UNet"
+  in_channels: 1
+  out_channels: 2
+  channels: [32, 64, 128, 256, 512]
+  strides: [2, 2, 2, 2]
+  num_res_units: 2
+  dropout: 0.2
+  norm: "instance"
+
+loss:
+  name: "DiceCE"
+  dice_weight: 1.0
+  ce_weight: 1.0
+  class_weights: [0.05, 1.0]
+
+evaluation:
+  sliding_window_size: [128, 128, 24]
+  overlap: 0.5
+  sw_batch_size: 4
+
+output:
+  checkpoint_dir: "results/checkpoints"
+  prediction_dir: "results/predictions"
+  figures_dir: "results/figures"
+  metrics_dir: "results/metrics"
