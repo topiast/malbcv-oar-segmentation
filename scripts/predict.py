@@ -23,9 +23,20 @@ sys.path.insert(0, str(project_root))
 from src.data.transforms import get_inference_transforms
 from src.data.dataset import get_test_datalist
 from src.export.rtstruct_export import prediction_to_nifti
-from src.models.unet3d import build_model
+from src.models import build_model
+from src.utils.config import resolve_config_paths
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_logits(outputs):
+    if isinstance(outputs, dict):
+        return outputs["logits"]
+    return outputs
+
+
+def _predict_logits(model, images):
+    return _extract_logits(model(images))
 
 
 def main():
@@ -38,8 +49,12 @@ def main():
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-    with open(args.config) as f:
-        config = yaml.safe_load(f)
+    config_path = Path(args.config)
+    if not config_path.is_absolute():
+        config_path = project_root / config_path
+
+    with config_path.open() as f:
+        config = resolve_config_paths(yaml.safe_load(f), project_root)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Device: {device}")
@@ -84,7 +99,7 @@ def main():
                     inputs=images,
                     roi_size=eval_cfg["sliding_window_size"],
                     sw_batch_size=eval_cfg["sw_batch_size"],
-                    predictor=model,
+                    predictor=lambda window: _predict_logits(model, window),
                     overlap=eval_cfg["overlap"],
                 )
 

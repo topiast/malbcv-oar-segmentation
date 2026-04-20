@@ -14,7 +14,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from src.data.dataset import get_training_datalists
 from src.data.transforms import get_train_transforms, get_val_transforms
-from src.models.unet3d import build_model, count_parameters
+from src.models import build_model, count_parameters
 from src.training.losses import build_loss
 from src.utils.config import get_foreground_label_map
 from src.utils.device import get_best_available_device
@@ -62,6 +62,7 @@ class Trainer:
             fold=self.fold,
             num_folds=train_cfg["num_folds"],
             seed=train_cfg["seed"],
+            split_file=cfg["data"].get("split_file"),
         )
         logger.info(f"Fold {self.fold}: {len(train_files)} train, {len(val_files)} val patients")
 
@@ -95,6 +96,8 @@ class Trainer:
             num_workers=train_cfg["num_workers"],
             pin_memory=self.device.type == "cuda",
         )
+        self.train_iterations_per_epoch = train_cfg.get("train_iterations_per_epoch", len(self.train_loader))
+        self._train_iterator = None
 
         # Model
         self.model = build_model(cfg).to(self.device)
@@ -105,16 +108,45 @@ class Trainer:
         self.loss_fn = build_loss(cfg).to(self.device)
 
         # Optimizer
-        self.optimizer = torch.optim.AdamW(
-            self.model.parameters(),
-            lr=train_cfg["learning_rate"],
-            weight_decay=train_cfg["weight_decay"],
-        )
+        base_lr = train_cfg["learning_rate"]
+        transformer_lr_ratio = train_cfg.get("transformer_lr_ratio")
+        if transformer_lr_ratio is not None and hasattr(self.model, "get_param_groups"):
+            parameters = self.model.get_param_groups(base_lr, transformer_lr_ratio)
+        else:
+            parameters = self.model.parameters()
+
+        optimizer_name = train_cfg.get("optimizer", "adamw").lower()
+        if optimizer_name == "sgd":
+            self.optimizer = torch.optim.SGD(
+                parameters,
+                lr=base_lr,
+                momentum=train_cfg.get("momentum", 0.9),
+                weight_decay=train_cfg["weight_decay"],
+                nesterov=train_cfg.get("nesterov", False),
+            )
+        else:
+            self.optimizer = torch.optim.AdamW(
+                parameters,
+                lr=base_lr,
+                weight_decay=train_cfg["weight_decay"],
+            )
 
         # LR scheduler
-        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            self.optimizer, T_max=train_cfg["num_epochs"]
-        )
+        scheduler_name = train_cfg.get("scheduler", "cosine").lower()
+        if scheduler_name == "polynomial":
+            power = train_cfg.get("poly_power", 0.9)
+
+            def _poly_lambda(epoch: int) -> float:
+                progress = min(epoch / max(train_cfg["num_epochs"], 1), 1.0)
+                return max((1.0 - progress) ** power, 0.0)
+
+            self.scheduler = torch.optim.lr_scheduler.LambdaLR(
+                self.optimizer, lr_lambda=_poly_lambda
+            )
+        else:
+            self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                self.optimizer, T_max=train_cfg["num_epochs"]
+            )
 
         # AMP scaler
         self.scaler = torch.amp.GradScaler("cuda") if train_cfg.get("amp", True) and self.device.type == "cuda" else None
@@ -123,10 +155,31 @@ class Trainer:
         self.best_dice = 0.0
         self.start_epoch = 0
 
+    def _next_train_batch(self):
+        """Cycle over the training loader to support a fixed iteration budget per epoch."""
+        if self._train_iterator is None:
+            self._train_iterator = iter(self.train_loader)
+        try:
+            return next(self._train_iterator)
+        except StopIteration:
+            self._train_iterator = iter(self.train_loader)
+            return next(self._train_iterator)
+
     def _to_device_tensor(self, data, dtype: torch.dtype | None = None) -> torch.Tensor:
         """Convert MONAI MetaTensor/plain tensors to a plain torch tensor on the active device."""
         tensor = data.as_tensor() if hasattr(data, "as_tensor") else data
         return tensor.to(device=self.device, dtype=dtype)
+
+    @staticmethod
+    def _extract_logits(outputs):
+        """Return dense semantic logits from either a tensor or a structured model output."""
+        if isinstance(outputs, dict):
+            return outputs["logits"]
+        return outputs
+
+    def _predict_logits(self, images: torch.Tensor) -> torch.Tensor:
+        """Tensor-only model wrapper for sliding-window inference."""
+        return self._extract_logits(self.model(images))
 
     def train(self):
         """Run the full training loop."""
@@ -140,7 +193,8 @@ class Trainer:
             epoch_start = time.time()
 
             # --- Train ---
-            train_loss = self._train_epoch(epoch)
+            train_metrics = self._train_epoch(epoch)
+            train_loss = train_metrics["loss"]
 
             # --- LR schedule ---
             self.scheduler.step()
@@ -149,13 +203,25 @@ class Trainer:
             # --- Log ---
             self.writer.add_scalar("train/loss", train_loss, epoch)
             self.writer.add_scalar("train/lr", current_lr, epoch)
+            for name, value in train_metrics.items():
+                if name == "loss":
+                    continue
+                self.writer.add_scalar(f"train/{name}", value, epoch)
 
             elapsed = time.time() - epoch_start
+            component_summary = ""
+            if "class_ce" in train_metrics:
+                component_summary = (
+                    f" | Class CE: {train_metrics['class_ce']:.4f}"
+                    f" | Mask BCE: {train_metrics['mask_bce']:.4f}"
+                    f" | Mask Dice: {train_metrics['mask_dice']:.4f}"
+                )
             logger.info(
                 f"Epoch {epoch+1}/{num_epochs} | "
                 f"Loss: {train_loss:.4f} | "
                 f"LR: {current_lr:.2e} | "
                 f"Time: {elapsed:.1f}s"
+                f"{component_summary}"
             )
 
             # --- Validate ---
@@ -188,13 +254,15 @@ class Trainer:
         self.writer.close()
         logger.info(f"Training complete. Best mean Dice: {self.best_dice:.4f}")
 
-    def _train_epoch(self, epoch: int) -> float:
-        """Train for one epoch. Returns average loss."""
+    def _train_epoch(self, epoch: int) -> dict[str, float]:
+        """Train for one epoch. Returns average training metrics."""
         self.model.train()
         epoch_loss = 0.0
         num_steps = 0
+        component_sums: dict[str, float] = {}
 
-        for batch in self.train_loader:
+        for _ in range(self.train_iterations_per_epoch):
+            batch = self._next_train_batch()
             images = self._to_device_tensor(batch["image"], dtype=torch.float32)
             labels = self._to_device_tensor(batch["label"], dtype=torch.long)
 
@@ -214,9 +282,15 @@ class Trainer:
                 self.optimizer.step()
 
             epoch_loss += loss.item()
+            if hasattr(self.loss_fn, "get_last_components"):
+                for name, value in self.loss_fn.get_last_components().items():
+                    component_sums[name] = component_sums.get(name, 0.0) + float(value)
             num_steps += 1
 
-        return epoch_loss / max(num_steps, 1)
+        metrics = {"loss": epoch_loss / max(num_steps, 1)}
+        for name, total in component_sums.items():
+            metrics[name] = total / max(num_steps, 1)
+        return metrics
 
     @torch.no_grad()
     def _validate(self, epoch: int) -> tuple[float, np.ndarray]:
@@ -242,7 +316,7 @@ class Trainer:
                         inputs=images,
                         roi_size=eval_cfg["sliding_window_size"],
                         sw_batch_size=eval_cfg["sw_batch_size"],
-                        predictor=self.model,
+                        predictor=self._predict_logits,
                         overlap=eval_cfg["overlap"],
                     )
             else:
@@ -250,7 +324,7 @@ class Trainer:
                     inputs=images,
                     roi_size=eval_cfg["sliding_window_size"],
                     sw_batch_size=eval_cfg["sw_batch_size"],
-                    predictor=self.model,
+                    predictor=self._predict_logits,
                     overlap=eval_cfg["overlap"],
                 )
 

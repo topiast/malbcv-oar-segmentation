@@ -17,7 +17,7 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.export.rtstruct_export import build_roi_config, export_rtstruct
-from src.utils.config import get_class_names
+from src.utils.config import get_class_names, resolve_config_paths
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +34,12 @@ def main():
 
     roi_config = None
     if args.config:
-        with open(args.config) as f:
-            config = yaml.safe_load(f)
+        config_path = Path(args.config)
+        if not config_path.is_absolute():
+            config_path = project_root / config_path
+
+        with config_path.open() as f:
+            config = resolve_config_paths(yaml.safe_load(f), project_root)
         roi_config = build_roi_config(get_class_names(config))
 
     export_rtstruct(args.ct_dicom_dir, args.prediction, args.output, roi_config=roi_config)

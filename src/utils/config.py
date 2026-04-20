@@ -1,6 +1,9 @@
-"""Configuration helpers for dataset labels and intensity scaling."""
+"""Configuration helpers for dataset labels, paths, and intensity scaling."""
 
 from __future__ import annotations
+
+from copy import deepcopy
+from pathlib import Path
 
 
 DEFAULT_CLASS_NAMES = [
@@ -19,6 +22,51 @@ DEFAULT_CLASS_NAMES = [
     "Right Adrenal Gland",
     "Left Adrenal Gland",
 ]
+
+PATH_KEYS = {
+    "data": {
+        "raw_dir",
+        "train_dir",
+        "processed_dir",
+        "test_dir",
+        "split_file",
+        "normalization_cache",
+    },
+    "output": {
+        "checkpoint_dir",
+        "prediction_dir",
+        "figures_dir",
+        "metrics_dir",
+    },
+}
+
+
+def resolve_config_paths(config: dict, base_dir: str | Path) -> dict:
+    """
+    Return a config copy with known relative filesystem paths resolved.
+
+    Repository configs use repo-relative paths like ``data/...`` and
+    ``results/...``. Resolving them once at load time makes notebooks and CLI
+    entry points insensitive to the caller's current working directory.
+    """
+    resolved = deepcopy(config)
+    base_dir = Path(base_dir)
+
+    for section, keys in PATH_KEYS.items():
+        section_cfg = resolved.get(section)
+        if not isinstance(section_cfg, dict):
+            continue
+
+        for key in keys:
+            value = section_cfg.get(key)
+            if value in (None, ""):
+                continue
+
+            path = Path(value)
+            if not path.is_absolute():
+                section_cfg[key] = str(base_dir / path)
+
+    return resolved
 
 
 def get_class_names(config: dict) -> list[str]:

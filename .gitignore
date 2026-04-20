@@ -3,8 +3,10 @@ data/raw/
 data/processed/
 
 # Results (regenerable)
-results/checkpoints/
-results/predictions/
+results/checkpoints*
+results/predictions*
+
+.codex
 
 # Python
 __pycache__/

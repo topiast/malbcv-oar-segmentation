@@ -1,5 +1,6 @@
 """Dataset utilities for supported segmentation directory layouts."""
 
+import json
 from pathlib import Path
 
 from sklearn.model_selection import KFold
@@ -25,7 +26,7 @@ def discover_training_pairs(data_dir: str | Path) -> list[dict]:
         ct_file = patient_dir / f"{patient_dir.name}.nii.gz"
         gt_file = patient_dir / "GT.nii.gz"
         if ct_file.exists() and gt_file.exists():
-            data_list.append({"image": str(ct_file), "label": str(gt_file)})
+            data_list.append({"image": str(ct_file), "label": str(gt_file), "case_id": patient_dir.name})
 
     if data_list:
         return data_list
@@ -37,7 +38,7 @@ def discover_training_pairs(data_dir: str | Path) -> list[dict]:
             case_id = ct_file.name.replace("img", "").replace(".nii.gz", "")
             gt_file = label_dir / f"label{case_id}.nii.gz"
             if gt_file.exists():
-                data_list.append({"image": str(ct_file), "label": str(gt_file)})
+                data_list.append({"image": str(ct_file), "label": str(gt_file), "case_id": case_id})
 
     if data_list:
         return data_list
@@ -48,7 +49,7 @@ def discover_training_pairs(data_dir: str | Path) -> list[dict]:
         for ct_file in sorted(avg_img_dir.glob("*_avg.nii.gz")):
             gt_file = avg_label_dir / ct_file.name.replace("_avg.nii.gz", "_avg_seg.nii.gz")
             if gt_file.exists():
-                data_list.append({"image": str(ct_file), "label": str(gt_file)})
+                data_list.append({"image": str(ct_file), "label": str(gt_file), "case_id": ct_file.stem})
 
     return data_list
 
@@ -58,6 +59,7 @@ def get_training_datalists(
     fold: int = 0,
     num_folds: int = 5,
     seed: int = 42,
+    split_file: str | Path | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """
     Generate train/val file lists for a given cross-validation fold.
@@ -67,6 +69,7 @@ def get_training_datalists(
         fold: Which fold to use for validation (0 to num_folds-1).
         num_folds: Total number of cross-validation folds.
         seed: Random seed for reproducible splits.
+        split_file: Optional path to an nnU-Net style ``splits_final.json``.
 
     Returns:
         Tuple of (train_files, val_files), each a list of dicts.
@@ -82,6 +85,22 @@ def get_training_datalists(
 
     if fold >= num_folds:
         raise ValueError(f"fold={fold} must be < num_folds={num_folds}")
+
+    split_path = Path(split_file) if split_file is not None else Path(data_dir) / "splits_final.json"
+    if split_path.exists():
+        with split_path.open() as f:
+            splits = json.load(f)
+        if fold >= len(splits):
+            raise ValueError(f"fold={fold} must be < number of split definitions ({len(splits)}) in {split_path}")
+
+        split = splits[fold]
+        case_map = {item["case_id"]: item for item in data_list}
+        try:
+            train_files = [case_map[case_id] for case_id in split["train"]]
+            val_files = [case_map[case_id] for case_id in split["val"]]
+        except KeyError as exc:
+            raise KeyError(f"Case id {exc.args[0]!r} from {split_path} not found in discovered training data") from exc
+        return train_files, val_files
 
     kf = KFold(n_splits=num_folds, shuffle=True, random_state=seed)
     splits = list(kf.split(data_list))

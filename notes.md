@@ -1,0 +1,1 @@
+in @maskmed_paper.pdf the model gets mean dice on 0.87 on BTCV and we are only getting about 0.72

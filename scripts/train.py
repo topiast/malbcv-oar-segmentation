@@ -21,6 +21,7 @@ sys.path.insert(0, str(project_root))
 
 from src.training.trainer import Trainer
 from src.utils.device import get_best_available_device, get_device_name
+from src.utils.config import resolve_config_paths
 
 
 def main():
@@ -50,10 +51,14 @@ def main():
     logger = logging.getLogger(__name__)
 
     # Load config
-    with open(args.config) as f:
-        config = yaml.safe_load(f)
+    config_path = Path(args.config)
+    if not config_path.is_absolute():
+        config_path = project_root / config_path
 
-    logger.info(f"Config loaded from {args.config}")
+    with config_path.open() as f:
+        config = resolve_config_paths(yaml.safe_load(f), project_root)
+
+    logger.info(f"Config loaded from {config_path}")
     logger.info(f"Device: {get_device_name(get_best_available_device())}")
 
     # Determine folds to train

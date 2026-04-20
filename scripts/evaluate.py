@@ -20,7 +20,7 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.evaluation.metrics import evaluate_patient
-from src.utils.config import get_foreground_label_map
+from src.utils.config import get_foreground_label_map, resolve_config_paths
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +43,12 @@ def main():
     label_map = None
 
     if args.config:
-        with open(args.config) as f:
-            config = yaml.safe_load(f)
+        config_path = Path(args.config)
+        if not config_path.is_absolute():
+            config_path = project_root / config_path
+
+        with config_path.open() as f:
+            config = resolve_config_paths(yaml.safe_load(f), project_root)
         label_map = get_foreground_label_map(config)
 
     # Find prediction files
