@@ -1,27 +1,40 @@
-# MALBCV OAR Segmentation
+# Abdominal OAR Segmentation (BTCV)
 
-Automatic segmentation of organs-at-risk (OAR) in abdominal CT volumes using a 3D U-Net built on [MONAI](https://monai.io/). Designed for the MALBCV dataset (84 annotated CT volumes, 13 abdominal organs + background).
+Automatic segmentation of organs-at-risk (OAR) in abdominal CT volumes, built on [MONAI](https://monai.io/). The project targets the **BTCV** (Beyond the Cranial Vault) multi-organ dataset — 30 annotated training volumes and 20 testing volumes, 13 abdominal organs + background — and benchmarks several 3D backbones against the MaskMed paper included in the repo (`maskmed_paper.pdf`).
 
 ## Segmented Organs
 
-| Label | Organ               | Label | Organ                  |
-|-------|---------------------|-------|------------------------|
-| 1     | Spleen              | 8     | Aorta                  |
-| 2     | Right Kidney        | 9     | Inferior Vena Cava     |
-| 3     | Left Kidney         | 10    | Portal & Splenic Veins |
-| 4     | Gallbladder         | 11    | Pancreas               |
-| 5     | Esophagus           | 12    | Right Adrenal Gland    |
-| 6     | Liver               | 13    | Left Adrenal Gland     |
-| 7     | Stomach             |       |                        |
+The class map is the standard BTCV 13-organ labelling plus background. The authoritative list lives in `src/utils/config.py` (`DEFAULT_CLASS_NAMES`) and is used whenever a config does not supply its own `data.class_names`:
+
+| Label | Class                  |
+|-------|------------------------|
+| 0     | Background             |
+| 1     | Spleen                 |
+| 2     | Right Kidney           |
+| 3     | Left Kidney            |
+| 4     | Gallbladder            |
+| 5     | Esophagus              |
+| 6     | Liver                  |
+| 7     | Stomach                |
+| 8     | Aorta                  |
+| 9     | IVC (Inferior Vena Cava) |
+| 10    | Portal & Splenic Veins |
+| 11    | Pancreas               |
+| 12    | Right Adrenal Gland    |
+| 13    | Left Adrenal Gland     |
+
+Verified against `data/raw/RawData/Training/label/*.nii.gz` — every annotated volume contains integer labels in `[0, 13]`, i.e. all 13 organs plus background.
+
+Class count is configurable — `configs/baseline.yaml`, `configs/btcv_raw.yaml`, `configs/swin_unetr.yaml`, and the MaskMed configs use all 14 classes, while `configs/averaged_binary.yaml` collapses every organ into a single foreground class (`num_classes: 2`, `class_names: ["Background", "Foreground"]`). To train on a different subset, override `data.num_classes` and `data.class_names` in the YAML.
 
 ## Features
 
-- **3D U-Net** (~30M params) with instance normalization and residual blocks
-- **DiceCE loss** with per-class weighting for extreme class imbalance (background ~94% of voxels)
-- **5-fold cross-validation** with configurable splits
-- **Mixed precision training** (AMP) on CUDA
-- **Sliding window inference** for processing full volumes without downsampling
-- **Comprehensive metrics**: Dice coefficient, HD95, Surface Dice
+- **Pluggable architectures** via a model factory: MONAI 3D residual U-Net, Swin UNETR, and a MaskMed-style set-prediction model with FSAD fusion and a Hungarian-matching head
+- **Multiple loss options**: DiceCE with per-class weighting for heavy class imbalance (background ≈ 94 % of voxels), and the MaskMed set criterion (classification + mask BCE + mask Dice)
+- **5-fold cross-validation** with configurable splits and seeded patient assignment
+- **Mixed precision training** (AMP) on CUDA, with either Adam or SGD + polynomial LR schedules
+- **Sliding-window inference** for processing full volumes at native resolution
+- **Metrics**: per-organ Dice, HD95, and Surface Dice (configurable mm tolerance)
 - **DICOM RT-Struct export** for clinical integration
 - **TensorBoard logging** for real-time training monitoring
 - **Docker support** for containerized inference
@@ -31,26 +44,32 @@ Automatic segmentation of organs-at-risk (OAR) in abdominal CT volumes using a 3
 ```
 .
 ├── src/
-│   ├── data/              # Dataset discovery, preprocessing, transforms
-│   ├── models/            # 3D U-Net architecture
-│   ├── training/          # Trainer class, DiceCE loss
+│   ├── data/              # Dataset discovery, preprocessing, transforms, intensity normalization
+│   ├── models/            # Model factory + UNet3D, SwinUNETR, MaskMed backbones
+│   ├── training/          # Trainer class, DiceCE and MaskMed losses
 │   ├── evaluation/        # Metrics (Dice, HD95, Surface Dice), visualization
-│   ├── export/            # NIfTI to DICOM RTSTRUCT conversion
+│   ├── export/            # NIfTI → DICOM RTSTRUCT conversion
 │   └── utils/             # Config helpers, device selection
 ├── scripts/
-│   ├── train.py           # Training (single fold or full CV)
-│   ├── predict.py         # Inference on new volumes
-│   ├── evaluate.py        # Compute metrics against ground truth
-│   ├── export_rtstruct.py # Export predictions as DICOM RTSTRUCT
+│   ├── train.py                    # Training (single fold or full CV)
+│   ├── predict.py                  # Inference on new volumes
+│   ├── evaluate.py                 # Compute metrics against ground truth
+│   ├── export_rtstruct.py          # Export predictions as DICOM RTSTRUCT
 │   └── normalize_nifti_headers.py  # Fix NIfTI qform/sform headers
 ├── configs/
-│   ├── baseline.yaml      # 14-class segmentation config
-│   └── averaged_binary.yaml  # Binary segmentation config
+│   ├── baseline.yaml         # 14-class 3D U-Net (default)
+│   ├── btcv_raw.yaml         # U-Net on raw BTCV inputs with dataset caching
+│   ├── swin_unetr.yaml       # Swin UNETR backbone
+│   ├── maskmed.yaml          # MaskMed set-prediction model
+│   ├── maskmed_v2.yaml       # MaskMed v2 variant
+│   └── averaged_binary.yaml  # Binary (foreground vs background) config
 ├── notebooks/
-│   └── 01_data_exploration.ipynb  # EDA: volume stats, label distributions
+│   ├── 01_data_exploration.ipynb     # EDA: volume stats, label distributions
+│   └── 02_fold0_prediction_viewer.py # marimo viewer for fold-0 predictions
 ├── data/
-│   ├── raw/               # Original MALBCV NIfTI volumes
-│   └── processed/         # Resampled & normalized volumes
+│   ├── raw/               # Original BTCV NIfTI volumes (img/ + label/)
+│   └── processed/         # Header-normalized / resampled volumes
+├── maskmed_paper.pdf      # Reference paper for the MaskMed backbone
 ├── Dockerfile
 ├── requirements.txt
 └── setup.py
@@ -69,27 +88,28 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
-**Requirements**: Python 3.8+, PyTorch 2.0+, MONAI 1.3+. A CUDA-capable GPU with at least 8 GB VRAM is recommended.
+**Requirements**: Python 3.8+, PyTorch 2.0+, MONAI 1.3+. A CUDA-capable GPU with at least 8 GB VRAM is recommended; the MaskMed and Swin UNETR configs benefit from 16 GB+.
 
 ## Data Preparation
 
-Place your MALBCV data under `data/raw/RawData/`:
+Obtain the BTCV challenge data (`RawData.zip`) and arrange it as:
 
 ```
 data/raw/RawData/
 ├── Training/
 │   ├── img/
-│   │   ├── img0001.nii.gz
+│   │   ├── img0001.nii.gz   # 30 training volumes
 │   │   └── ...
 │   └── label/
 │       ├── label0001.nii.gz
 │       └── ...
 └── Testing/
     └── img/
+        ├── img0061.nii.gz   # 20 testing volumes (no labels)
         └── ...
 ```
 
-Optionally fix NIfTI header issues and resample to uniform spacing:
+Some BTCV volumes ship with inconsistent `qform`/`sform` headers. Normalize them (and optionally resample to a uniform grid) with:
 
 ```bash
 python scripts/normalize_nifti_headers.py \
@@ -97,18 +117,22 @@ python scripts/normalize_nifti_headers.py \
   --output-root data/processed/RawData
 ```
 
-Input volumes are resampled to 1.5 x 1.5 x 2.0 mm spacing, clipped to [-175, 250] HU (soft tissue window), and z-score normalized.
+At training/inference time, MONAI transforms resample to 1.5 × 1.5 × 2.0 mm spacing, clip intensities to [-175, 250] HU (soft-tissue window), and apply z-score normalization. These values are set in each config's `data` block.
 
 ## Usage
 
 ### Training
 
 ```bash
-# Train a single fold
+# Train a single fold with the default 3D U-Net
 python scripts/train.py --config configs/baseline.yaml --fold 0
 
-# Train all 5 folds
+# Train all 5 CV folds
 python scripts/train.py --config configs/baseline.yaml --fold -1
+
+# Swap in a different architecture
+python scripts/train.py --config configs/swin_unetr.yaml --fold 0
+python scripts/train.py --config configs/maskmed.yaml    --fold 0
 
 # Resume from checkpoint
 python scripts/train.py --config configs/baseline.yaml --fold 0 \
@@ -158,27 +182,31 @@ python scripts/export_rtstruct.py \
 
 All settings are defined in YAML config files. Key sections:
 
-| Section      | Key parameters                                                  |
-|--------------|-----------------------------------------------------------------|
-| `data`       | `patch_size`, `target_spacing`, `intensity_clip`, `num_classes` |
-| `training`   | `batch_size`, `num_epochs`, `learning_rate`, `num_folds`, `amp` |
-| `model`      | `channels`, `strides`, `num_res_units`, `dropout`, `norm`       |
-| `loss`       | `dice_weight`, `ce_weight`, `class_weights`                     |
-| `evaluation` | `sliding_window_size`, `overlap`, `sw_batch_size`               |
+| Section      | Key parameters                                                                |
+|--------------|--------------------------------------------------------------------------------|
+| `data`       | `patch_size`, `target_spacing`, `intensity_clip`, `num_classes`, `cache_rate` |
+| `training`   | `batch_size`, `num_epochs`, `learning_rate`, `num_folds`, `amp`, `optimizer`  |
+| `model`      | `architecture` (`UNet`, `SwinUNETR`, `MaskMed`) + architecture-specific params |
+| `loss`       | `name` (`DiceCE` or `MaskMed`) + corresponding weights / `class_weights`       |
+| `evaluation` | `sliding_window_size`, `overlap`, `sw_batch_size`                              |
 
-See `configs/baseline.yaml` for the full reference configuration.
+See `configs/baseline.yaml` for the full reference configuration, and `configs/maskmed.yaml` / `configs/swin_unetr.yaml` for examples of the alternative backbones.
+
+## Current Status
+
+Baseline 3D U-Net reaches roughly **0.72 mean Dice** on the BTCV training split under 5-fold CV, versus the ~0.87 reported by the MaskMed paper. The MaskMed and Swin UNETR configs in this repo are being tuned to close that gap (see `notes.md`).
 
 ## Docker
 
 ```bash
 # Build
-docker build -t malbcv-oar .
+docker build -t btcv-oar .
 
 # Run inference
 docker run --gpus all \
   -v /path/to/input:/input \
   -v /path/to/output:/output \
-  malbcv-oar \
+  btcv-oar \
   --config configs/baseline.yaml \
   --checkpoint /model.pth \
   --input /input \
